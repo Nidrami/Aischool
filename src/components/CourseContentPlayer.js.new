@@ -1,0 +1,735 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  Box,
+  Typography,
+  Paper,
+  Divider,
+  Button,
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  ListItemButton,
+  Alert,
+  Breadcrumbs,
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  Chip,
+  Dialog,
+} from '@mui/material';
+import {
+  PlayCircleOutline as PlayIcon,
+  Assignment as AssignmentIcon,
+  Article as DocumentIcon,
+  Quiz as QuizIcon,
+  CheckCircle as CompletedIcon,
+  RadioButtonUnchecked as IncompleteIcon,
+  NavigateNext,
+  NavigateNext as NextIcon,
+  NavigateBefore as PrevIcon,
+  MenuBook as ChapterIcon,
+  ExpandLess as ExpandLessIcon,
+  ExpandMore as ExpandMoreIcon,
+  Home as HomeIcon,
+  School as SchoolIcon,
+  Edit as EditIcon,
+  ArrowBack as BackIcon,
+} from '@mui/icons-material';
+import { Link, useParams, useNavigate } from 'react-router-dom';
+import { courseAPI } from '../services/api';
+import { courseContentAPI } from '../services/courseContentAPI';
+import progressAPI from '../services/progressAPI';
+import ReactPlayer from 'react-player/lazy';
+import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import SimpleContentForm from './SimpleContentForm';
+
+const CourseContentPlayer = () => {
+  const { courseId, chapterId, contentId } = useParams();
+  const navigate = useNavigate();
+  const playerRef = useRef(null);
+  const { user } = useAuth();
+  
+  const [loading, setLoading] = useState(true);
+  const [course, setCourse] = useState(null);
+  const [chapter, setChapter] = useState(null);
+  const [content, setContent] = useState(null);
+  const [contentList, setContentList] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [error, setError] = useState('');
+  const [progressUpdated, setProgressUpdated] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  
+  // Admin controls state
+  const [openContentForm, setOpenContentForm] = useState(false);
+  const [editContent, setEditContent] = useState(null);
+  
+  // Check if user is admin or teacher
+  const isTeacherOrAdmin = () => {
+    if (!user) return false;
+    const roles = user.roles || [];
+    return roles.some(role => 
+      ['ADMIN', 'TEACHER', 'ROLE_ADMIN', 'ROLE_TEACHER'].includes(role));
+  };
+  
+  // Handle content editing for admins
+  const handleEditContent = () => {
+    setEditContent(content);
+    setOpenContentForm(true);
+  };
+  
+  // Handle content form success
+  const handleContentFormSuccess = (updatedContent) => {
+    console.log('Content updated successfully:', updatedContent);
+    setOpenContentForm(false);
+    setEditContent(null);
+    
+    // Replace the content in the current view
+    if (updatedContent && updatedContent.id === parseInt(contentId)) {
+      setContent(updatedContent);
+    }
+    
+    // Refresh the content list if needed
+    fetchCourseData();
+  };
+  
+  useEffect(() => {
+    fetchCourseData();
+  }, [courseId]);
+  
+  useEffect(() => {
+    // This effect runs when chapter and content are directly fetched
+    if (chapter && content) {
+      console.log('Working with directly fetched chapter and content');
+      
+      // Prepare the flat content list for navigation - either from the chapter or by fetching all contents
+      const prepareContentList = async () => {
+        try {
+          let allContent = [];
+          
+          // If chapter has contents array, use it
+          const contentArray = chapter.contents || chapter.content;
+          if (Array.isArray(contentArray) && contentArray.length > 0) {
+            allContent = contentArray.map(c => ({
+              ...c,
+              chapterId: chapter.id,
+              chapterTitle: chapter.title
+            }));
+          } else {
+            // Otherwise fetch chapter contents
+            try {
+              const response = await fetch(`/api/course-contents/chapter/${chapter.id}`);
+              if (response.ok) {
+                const contentsData = await response.json();
+                allContent = contentsData.map(c => ({
+                  ...c,
+                  chapterId: chapter.id,
+                  chapterTitle: chapter.title
+                }));
+              }
+            } catch (error) {
+              console.error('Error fetching chapter contents for navigation:', error);
+            }
+          }
+          
+          if (allContent.length > 0) {
+            setContentList(allContent);
+            
+            // Find current index for navigation
+            const index = allContent.findIndex(c => c.id === parseInt(contentId));
+            if (index !== -1) {
+              setCurrentIndex(index);
+            }
+          }
+        } catch (error) {
+          console.error('Error preparing content list:', error);
+        }
+      };
+      
+      prepareContentList();
+    }
+  }, [chapter, content, contentId]);
+  
+  // Effect to clear loading state after all data is processed
+  useEffect(() => {
+    if (error || (course && chapter && content)) {
+      setLoading(false);
+    }
+  }, [course, chapter, content, error]);
+  
+  const fetchCourseData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch course data
+      const courseResponse = await courseAPI.getCourse(courseId);
+      console.log('Course API Response:', courseResponse.data);
+      
+      if (courseResponse.data) {
+        setCourse(courseResponse.data);
+        
+        // If chapter ID and content ID are provided, fetch them directly
+        if (chapterId && contentId) {
+          try {
+            // Fetch the specific chapter directly
+            const chapterResponse = await fetch(`/api/chapters/${chapterId}`);
+            if (chapterResponse.ok) {
+              const chapterData = await chapterResponse.json();
+              console.log('Chapter API Response:', chapterData);
+              setChapter(chapterData);
+            } else {
+              console.error('Chapter fetch failed with status:', chapterResponse.status);
+              // Try alternative fetch method for the chapter
+              try {
+                const chaptersResponse = await fetch(`/api/chapters/course/${courseId}`);
+                if (chaptersResponse.ok) {
+                  const chaptersData = await chaptersResponse.json();
+                  console.log('Chapters by course API Response:', chaptersData);
+                  const foundChapter = chaptersData.find(ch => ch.id === parseInt(chapterId));
+                  if (foundChapter) {
+                    console.log('Found chapter in course chapters:', foundChapter);
+                    setChapter(foundChapter);
+                  } else {
+                    console.error('Chapter not found in course chapters');
+                  }
+                }
+              } catch (chaptersError) {
+                console.error('Alternative chapter fetch failed:', chaptersError);
+              }
+            }
+            
+            // Try to fetch the specific content directly
+            try {
+              const contentResponse = await courseContentAPI.getContent(contentId);
+              console.log('Content API Response:', contentResponse.data);
+              if (contentResponse.data) {
+                setContent(contentResponse.data);
+              }
+            } catch (contentError) {
+              console.error('Content fetch failed:', contentError);
+              // Try to fetch from chapter contents API
+              try {
+                const chapterContentsResponse = await fetch(`/api/course-contents/chapter/${chapterId}`);
+                if (chapterContentsResponse.ok) {
+                  const contentsData = await chapterContentsResponse.json();
+                  console.log('Chapter contents API Response:', contentsData);
+                  const foundContent = contentsData.find(c => c.id === parseInt(contentId));
+                  if (foundContent) {
+                    console.log('Found content in chapter contents:', foundContent);
+                    setContent(foundContent);
+                  }
+                }
+              } catch (chapterContentsError) {
+                console.error('Chapter contents fetch failed:', chapterContentsError);
+              }
+            }
+          } catch (fetchError) {
+            console.error('Error fetching chapter or content:', fetchError);
+          }
+        }
+      } else {
+        setError('Failed to load course');
+      }
+    } catch (error) {
+      console.error('Error fetching course:', error);
+      setError('Error loading course data');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const markContentAsCompleted = async () => {
+    try {
+      await progressAPI.markContentCompleted(contentId);
+      
+      // Update the local state
+      if (content) {
+        setContent({
+          ...content,
+          completed: true
+        });
+        setProgressUpdated(true);
+      }
+    } catch (error) {
+      console.error('Error marking content as completed:', error);
+    }
+  };
+  
+  const updateVideoProgress = async (position) => {
+    try {
+      await progressAPI.updateContentPosition(contentId, Math.floor(position));
+      setVideoProgress(position);
+    } catch (error) {
+      console.error('Error updating video progress:', error);
+    }
+  };
+  
+  const handleVideoProgress = (state) => {
+    const currentTime = state.playedSeconds;
+    // Update progress every 10 seconds or when 90% complete
+    if (Math.floor(currentTime) % 10 === 0 || state.played > 0.9) {
+      updateVideoProgress(currentTime);
+    }
+    
+    // Mark as completed if watched more than 90%
+    if (state.played > 0.9 && !content?.completed && !progressUpdated) {
+      markContentAsCompleted();
+    }
+  };
+  
+  const navigateToContent = (direction) => {
+    const newIndex = currentIndex + direction;
+    if (newIndex >= 0 && newIndex < contentList.length) {
+      const nextContent = contentList[newIndex];
+      navigate(`/course/${courseId}/chapter/${nextContent.chapterId}/content/${nextContent.id}`);
+    }
+  };
+  
+  const renderContentByType = () => {
+    if (!content) {
+      console.log('No content to render');
+      return (
+        <Box p={4} textAlign="center">
+          <Typography variant="h6" color="error" gutterBottom>Content not available</Typography>
+          <Typography variant="body2">Unable to load the content. Please try again or contact support.</Typography>
+        </Box>
+      );
+    }
+    
+    console.log('Rendering content type:', content.type, 'with content:', content.content);
+    
+    switch (content.type?.toLowerCase()) {
+      case 'video':
+        return (
+          <Box>
+            {/* Video player with proper error handling */}
+            <Box sx={{ width: '100%', paddingTop: '56.25%', position: 'relative', mb: 2 }}>
+              {content.content ? (
+                <ReactPlayer
+                  ref={playerRef}
+                  url={content.content}
+                  width="100%"
+                  height="100%"
+                  style={{ position: 'absolute', top: 0, left: 0 }}
+                  controls
+                  onProgress={handleVideoProgress}
+                  onEnded={() => markContentAsCompleted()}
+                  progressInterval={1000}
+                  config={{
+                    youtube: {
+                      playerVars: { showinfo: 1 }
+                    },
+                    file: {
+                      forceVideo: true
+                    }
+                  }}
+                />
+              ) : (
+                <Box 
+                  sx={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: 'action.hover',
+                    borderRadius: 1
+                  }}
+                >
+                  <Typography variant="h6" color="text.secondary">
+                    Video content not available or URL invalid
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+
+            {/* Display the content text if available */}
+            {content.content && (
+              <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.paper', borderRadius: 1 }}>
+                <Typography variant="h6" gutterBottom>Video URL</Typography>
+                <Typography variant="body2" component="code" sx={{ wordBreak: 'break-all' }}>
+                  {content.content}
+                </Typography>
+              </Paper>
+            )}
+            
+            <Box display="flex" justifyContent="center" mt={4}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={markContentAsCompleted}
+                startIcon={content.completed ? <CompletedIcon /> : <IncompleteIcon />}
+              >
+                {content.completed ? 'Completed' : 'Mark as Completed'}
+              </Button>
+            </Box>
+          </Box>
+        );
+        
+      case 'document':
+        return (
+          <Paper 
+            sx={{ 
+              p: 3, 
+              maxHeight: '70vh', 
+              overflow: 'auto',
+              '& img': { maxWidth: '100%' }
+            }}
+          >
+            {content.content ? (
+              <ReactMarkdown rehypePlugins={[rehypeRaw]}>{content.content}</ReactMarkdown>
+            ) : (
+              <Typography variant="body1" color="textSecondary" fontStyle="italic">
+                Document content not available
+              </Typography>
+            )}
+            
+            <Box display="flex" justifyContent="center" mt={4}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={markContentAsCompleted}
+                startIcon={content.completed ? <CompletedIcon /> : <IncompleteIcon />}
+              >
+                {content.completed ? 'Completed' : 'Mark as Completed'}
+              </Button>
+            </Box>
+          </Paper>
+        );
+        
+      case 'assignment':
+      case 'quiz':
+        return (
+          <Card sx={{ mb: 4 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                {content.type === 'assignment' ? 'Assignment' : 'Quiz'}
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {content.content ? (
+                <ReactMarkdown rehypePlugins={[rehypeRaw]}>{content.content}</ReactMarkdown>
+              ) : (
+                <Typography variant="body1" color="textSecondary" fontStyle="italic">
+                  {content.type} content not available
+                </Typography>
+              )}
+              
+              <Box display="flex" justifyContent="center" mt={4}>
+                <Button 
+                  variant="contained" 
+                  color="primary" 
+                  onClick={markContentAsCompleted}
+                  startIcon={content.completed ? <CompletedIcon /> : <IncompleteIcon />}
+                >
+                  {content.completed ? 'Completed' : 'Mark as Completed'}
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+        );
+        
+      default:
+        return (
+          <Box p={3}>
+            {content.content ? (
+              <Typography variant="body1">{content.content}</Typography>
+            ) : (
+              <Typography variant="body1" color="textSecondary" fontStyle="italic">
+                Content not available
+              </Typography>
+            )}
+            
+            <Box display="flex" justifyContent="center" mt={4}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={markContentAsCompleted}
+                startIcon={content.completed ? <CompletedIcon /> : <IncompleteIcon />}
+              >
+                {content.completed ? 'Completed' : 'Mark as Completed'}
+              </Button>
+            </Box>
+          </Box>
+        );
+    }
+  };
+  
+  const renderSidebar = () => {
+    // Return early if course is not loaded yet
+    if (!course) {
+      return (
+        <Box sx={{ p: 2, width: 280 }}>
+          <CircularProgress size={24} />
+          <Typography variant="body2" sx={{ mt: 1 }}>Loading course...</Typography>
+        </Box>
+      );
+    }
+    
+    return (
+      <Box
+        sx={{
+          width: 280,
+          p: 2,
+          borderRight: '1px solid',
+          borderColor: 'divider',
+          height: '100%',
+          overflow: 'auto',
+          display: showSidebar ? 'block' : 'none'
+        }}
+      >
+        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+          <SchoolIcon sx={{ mr: 1 }} />
+          Course Content
+        </Typography>
+        <Divider sx={{ mb: 2 }} />
+        
+        {course?.chapters?.map((chap, chapIndex) => (
+          <Box key={chap.id} sx={{ mb: 2 }}>
+            <Box 
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                mb: 1, 
+                py: 1,
+                px: 1,
+                bgcolor: chap.id === parseInt(chapterId) ? 'action.selected' : 'transparent',
+                borderRadius: 1
+              }}
+            >
+              <ChapterIcon sx={{ mr: 1, color: 'primary.main' }} />
+              <Typography sx={{ fontWeight: 'medium' }}>
+                {chapIndex + 1}. {chap.title}
+              </Typography>
+            </Box>
+            
+            <List dense disablePadding>
+              {chap.content?.map((cont, contIndex) => (
+                <ListItem
+                  key={cont.id}
+                  disablePadding
+                  sx={{
+                    bgcolor: cont.id === parseInt(contentId) ? 'action.selected' : 'transparent',
+                    borderRadius: 1,
+                    mb: 0.5
+                  }}
+                >
+                  <ListItemButton
+                    component={Link}
+                    to={`/course/${courseId}/chapter/${chap.id}/content/${cont.id}`}
+                    sx={{
+                      borderRadius: 1,
+                      '&:hover': { bgcolor: 'action.hover' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      {cont.completed ? (
+                        <CompletedIcon fontSize="small" color="success" />
+                      ) : (
+                        <IncompleteIcon fontSize="small" color="disabled" />
+                      )}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={`${chapIndex + 1}.${contIndex + 1} ${cont.title}`}
+                      secondary={cont.type}
+                      primaryTypographyProps={{ 
+                        variant: 'body2',
+                        fontWeight: cont.id === parseInt(contentId) ? 'bold' : 'regular'
+                      }}
+                      secondaryTypographyProps={{ 
+                        variant: 'caption',
+                        color: 'text.secondary'
+                      }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        ))}
+      </Box>
+    );
+  };
+  
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" height="calc(100vh - 64px)">
+        <CircularProgress />
+      </Box>
+    );
+  }
+  
+  if (error) {
+    return (
+      <Box p={4} textAlign="center">
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => navigate(-1)}
+          sx={{ mt: 2 }}
+        >
+          Back to Courses
+        </Button>
+      </Box>
+    );
+  }
+  
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
+      {/* Top Navigation with breadcrumbs and admin controls */}
+      <Box 
+        sx={{ 
+          p: 2, 
+          borderBottom: '1px solid', 
+          borderColor: 'divider',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}
+      >
+        <Breadcrumbs separator={<NavigateNext fontSize="small" />}>
+          <Link to="/courses" style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center' }}>
+            <HomeIcon sx={{ mr: 0.5 }} fontSize="small" />
+            Courses
+          </Link>
+          <Link to={`/course/${courseId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+            {course?.title || 'Course'}
+          </Link>
+          <Typography color="text.primary">
+            {content?.title || 'Content'}
+          </Typography>
+        </Breadcrumbs>
+        
+        {/* Admin Controls */}
+        {isTeacherOrAdmin() && (
+          <Box>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<EditIcon />}
+              onClick={handleEditContent}
+              disabled={!content}
+              sx={{ mr: 1 }}
+            >
+              Edit Content
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<BackIcon />}
+              onClick={() => navigate(`/course/${courseId}`)}
+            >
+              Back to Course
+            </Button>
+          </Box>
+        )}
+      </Box>
+      
+      {/* Main Content Area */}
+      <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+        {/* Sidebar */}
+        {renderSidebar()}
+        
+        {/* Content Area */}
+        <Box
+          sx={{
+            flexGrow: 1,
+            p: 3,
+            overflow: 'auto',
+            height: '100%',
+            position: 'relative',
+            width: showSidebar ? 'calc(100% - 280px)' : '100%',
+          }}
+        >
+          {/* Content display */}
+          {content && (
+            <Box>
+              {/* Title and metadata */}
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+                <Box>
+                  <Typography variant="h5" fontWeight="bold">
+                    {content.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {content.type} • {content.duration} min
+                  </Typography>
+                </Box>
+                {content.completed && (
+                  <Chip 
+                    size="small" 
+                    icon={<CompletedIcon />}
+                    label="Completed"
+                    color="success"
+                  />
+                )}
+              </Box>
+              
+              {/* Toggle sidebar button */}
+              <Box position="absolute" top={16} right={16}>
+                <IconButton 
+                  onClick={() => setShowSidebar(!showSidebar)}
+                  size="small"
+                  color="primary"
+                >
+                  {showSidebar ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                </IconButton>
+              </Box>
+              
+              {/* Content rendering */}
+              {renderContentByType()}
+              
+              {/* Navigation buttons */}
+              <Box 
+                display="flex" 
+                justifyContent="space-between" 
+                mt={4}
+                pb={4}
+              >
+                <Button
+                  variant="outlined"
+                  startIcon={<PrevIcon />}
+                  onClick={() => navigateToContent(-1)}
+                  disabled={currentIndex === 0}
+                >
+                  Previous Lesson
+                </Button>
+                
+                <Button
+                  variant="contained"
+                  endIcon={<NextIcon />}
+                  onClick={() => navigateToContent(1)}
+                  disabled={currentIndex === contentList.length - 1}
+                  color="primary"
+                >
+                  Next Lesson
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </Box>
+      </Box>
+      
+      {/* Content Edit Form Dialog */}
+      {isTeacherOrAdmin() && (
+        <SimpleContentForm
+          open={openContentForm}
+          onClose={() => setOpenContentForm(false)}
+          onSuccess={handleContentFormSuccess}
+          initialData={editContent}
+          chapterId={parseInt(chapterId)}
+        />
+      )}
+    </Box>
+  );
+};
+
+export default CourseContentPlayer;

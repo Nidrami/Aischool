@@ -1,0 +1,6 @@
+Please create a 192x192 pixel PNG image with the following characteristics:
+- Circle background in #00843D (green) color
+- Bold white text "MSE" centered in the circle
+- Clean, simple design with no gradients
+
+You can use an online tool like Canva, Figma, or any image editor to create this icon and save it as logo192.png in the frontend/public directory.

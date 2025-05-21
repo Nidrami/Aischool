@@ -26,7 +26,7 @@ const CourseCard = ({ course, onEdit, onDelete }) => {
   const isAdmin = user?.role === 'ADMIN';
 
   const handleClick = () => {
-    navigate(`/courses/${course.id}`);
+    navigate(`/course/${course.id}`);
   };
 
   return (
@@ -92,7 +92,7 @@ const CourseCard = ({ course, onEdit, onDelete }) => {
               size="small"
               color="secondary"
               startIcon={<VideocamIcon />}
-              onClick={() => navigate(`/courses/${course.id}/live-sessions`)}
+              onClick={() => navigate(`/course/${course.id}/live-sessions`)}
             >
               Live Sessions
             </Button>

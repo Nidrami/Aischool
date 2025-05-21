@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -13,10 +12,17 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  CircularProgress,
+  Divider,
 } from '@mui/material';
+import { School as SchoolIcon } from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
+import AIChatBot from '../components/chatbot/AIChatBot';
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login, register, isAuthenticated, loading } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
   const [error, setError] = useState('');
   const [formData, setFormData] = useState({
@@ -27,65 +33,160 @@ const Login = () => {
     role: 'STUDENT',
   });
 
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      const from = location.state?.from?.pathname || '/dashboard';
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate, location]);
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const validateForm = () => {
+    if (!formData.email) {
+      setError('Email is required');
+      return false;
+    }
+    if (!formData.password) {
+      setError('Password is required');
+      return false;
+    }
+    if (isRegistering) {
+      if (!formData.firstName) {
+        setError('First name is required');
+        return false;
+      }
+      if (!formData.lastName) {
+        setError('Last name is required');
+        return false;
+      }
+    }
+    return true;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
-      console.log('Sending request to:', `http://localhost:8080${endpoint}`);
-      
-      const requestData = isRegistering ? formData : {
-        email: formData.email,
-        password: formData.password
-      };
-
-      console.log('Request data:', requestData);
-      const response = await axios.post(`http://localhost:8080${endpoint}`, requestData);
-      console.log('Response:', response);
-      
-      // Both login and registration now return token and role
-      const { token, role } = response.data;
-      console.log('Authentication successful - Role:', role);
-      localStorage.setItem('token', token);
-      localStorage.setItem('role', role);
-
-      // Set the default Authorization header for all future requests
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      // Redirect based on role
-      switch (role) {
-        case 'ADMIN':
-          console.log('Redirecting to admin dashboard');
-          navigate('/admin/dashboard');
-          break;
-        case 'TEACHER':
-          console.log('Redirecting to teacher dashboard');
-          navigate('/teacher/dashboard');
-          break;
-        default:
-          console.log('Redirecting to student dashboard');
-          navigate('/dashboard');
+      if (isRegistering) {
+        const result = await register(formData);
+        if (!result.success) {
+          setError(result.message);
+        }
+      } else {
+        await handleLogin();
       }
     } catch (err) {
-      console.error('Error details:', err.response?.data);
-      setError(err.response?.data || 'An error occurred. Please try again.');
+      console.error('Error:', err);
+      setError('An unexpected error occurred. Please try again.');
     }
   };
 
+  const handleLogin = async () => {
+    try {
+      setError('');
+      
+      // Basic validation
+      if (!formData.email.trim() || !formData.password) {
+        setError('Please enter both email and password');
+        return;
+      }
+      
+      const result = await login({
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (!result.success) {
+        setError(result.message || 'Login failed. Please check your credentials.');
+      }
+    } catch (err) {
+      console.error('Login error in component:', err);
+      setError('Authentication error: ' + (err.message || 'Unknown error'));
+    }
+  };
+
+  const toggleMode = () => {
+    setIsRegistering(!isRegistering);
+    setError('');
+    setFormData({
+      email: '',
+      password: '',
+      firstName: '',
+      lastName: '',
+      role: 'STUDENT',
+    });
+  };
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
-    <Container component="main" maxWidth="xs">
-      <Paper elevation={3} sx={{ p: 4, mt: 8 }}>
-        <Typography component="h1" variant="h5" align="center" gutterBottom>
-          {isRegistering ? 'Register' : 'Login'}
+    <Container component="main" maxWidth="sm">
+      {/* Logo and School Name */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', my: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <Box
+            sx={{ 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: '#fff', 
+              width: 60,
+              height: 60,
+              borderRadius: '8px',
+              mr: 2,
+              overflow: 'hidden',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+            }}
+          >
+            <SchoolIcon 
+              sx={{ 
+                color: '#00843D', 
+                fontSize: 40,
+                filter: 'drop-shadow(1px 1px 1px rgba(0,0,0,0.2))' 
+              }} 
+            />
+          </Box>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', color: '#00843D' }}>
+            School of Excellence
+          </Typography>
+        </Box>
+        <Typography variant="subtitle1" color="text.secondary" sx={{ textAlign: 'center' }}>
+          Empowering students with knowledge and excellence
+        </Typography>
+      </Box>
+
+      {/* Login/Register Form */}
+      <Paper 
+        elevation={3} 
+        sx={{ 
+          p: 4, 
+          borderTop: '4px solid #00843D',
+          borderRadius: '4px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          mb: 4
+        }}
+      >
+        <Typography component="h1" variant="h5" align="center" gutterBottom color="primary">
+          {isRegistering ? 'Create Account' : 'Sign In'}
         </Typography>
         
         {error && (
-          <Alert severity={error.includes('successful') ? 'success' : 'error'} sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
@@ -102,6 +203,7 @@ const Login = () => {
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleChange}
+                autoFocus
               />
               <TextField
                 margin="normal"
@@ -124,10 +226,15 @@ const Login = () => {
                   label="Role"
                 >
                   <MenuItem value="STUDENT">Student</MenuItem>
-                  <MenuItem value="TEACHER">Teacher</MenuItem>
-                  <MenuItem value="ADMIN">Admin</MenuItem>
+                  <MenuItem value="TEACHER_PENDING">Teacher</MenuItem>
+                
                 </Select>
               </FormControl>
+              {formData.role === 'TEACHER_PENDING' && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Teacher accounts require admin approval. You'll be directed to an application page after registration.
+                </Alert>
+              )}
             </>
           )}
           <TextField
@@ -140,6 +247,7 @@ const Login = () => {
             autoComplete="email"
             value={formData.email}
             onChange={handleChange}
+            autoFocus={!isRegistering}
           />
           <TextField
             margin="normal"
@@ -149,41 +257,72 @@ const Login = () => {
             label="Password"
             type="password"
             id="password"
-            autoComplete="current-password"
+            autoComplete={isRegistering ? 'new-password' : 'current-password'}
             value={formData.password}
             onChange={handleChange}
           />
+          
           <Button
             type="submit"
             fullWidth
             variant="contained"
-            sx={{ mt: 3, mb: 2 }}
-          >
-            {isRegistering ? 'Register' : 'Login'}
-          </Button>
-        </form>
-
-        <Box textAlign="center">
-          <Button
             color="primary"
-            onClick={() => {
-              setIsRegistering(!isRegistering);
-              setError('');
-              setFormData({
-                email: '',
-                password: '',
-                firstName: '',
-                lastName: '',
-                role: 'STUDENT',
-              });
+            sx={{ 
+              mt: 3, 
+              mb: 2, 
+              py: 1.5, 
+              fontSize: '1rem',
+              backgroundColor: '#00843D',
+              '&:hover': {
+                backgroundColor: '#005025'
+              }
             }}
+            disabled={loading}
           >
-            {isRegistering
-              ? "DON'T HAVE AN ACCOUNT? REGISTER"
-              : "ALREADY HAVE AN ACCOUNT? LOGIN"}
+            {loading ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              isRegistering ? 'Register' : 'Sign In'
+            )}
           </Button>
-        </Box>
+
+          <Divider sx={{ my: 2 }} />
+          
+          <Box textAlign="center">
+            <Button
+              onClick={toggleMode}
+              sx={{ 
+                textTransform: 'none',
+                color: '#00843D',
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 132, 61, 0.04)'
+                }
+              }}
+              disabled={loading}
+            >
+              {isRegistering
+                ? "Already have an account? Sign In"
+                : "Don't have an account? Register"}
+            </Button>
+          </Box>
+        </form>
       </Paper>
+
+      {/* Information Box */}
+      <Paper elevation={2} sx={{ p: 3, mb: 4, bgcolor: '#f8f8f8' }}>
+        <Typography variant="h6" gutterBottom color="primary">
+          Welcome to School of Excellence
+        </Typography>
+        <Typography variant="body2" paragraph>
+          Our platform offers a variety of courses taught by expert instructors. You can ask our AI assistant any questions about our programs or educational opportunities.
+        </Typography>
+        <Typography variant="body2">
+          Have questions? Use the chat icon in the bottom-right corner to get immediate assistance!
+        </Typography>
+      </Paper>
+
+      {/* AI Chatbot for pre-login access */}
+      <AIChatBot />
     </Container>
   );
 };

@@ -1,0 +1,495 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  Button,
+  TextField,
+  Typography,
+  Paper,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Checkbox,
+  ListItemText,
+  OutlinedInput,
+  FormHelperText,
+  CircularProgress,
+  Alert,
+  Divider,
+  Tab,
+  Tabs,
+  Chip,
+  FormControlLabel,
+} from '@mui/material';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { courseAPI, userAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import MultipleQuestionForm from './MultipleQuestionForm';
+
+const AssignmentForm = ({ initialData, onSubmit, onCancel }) => {
+  const { user } = useAuth();
+  const [formData, setFormData] = useState({
+    title: initialData?.title || '',
+    description: initialData?.description || '',
+    dueDate: initialData?.dueDate ? new Date(initialData.dueDate) : new Date(),
+    courseId: initialData?.courseId || '',
+    assignedStudentIds: initialData?.assignedStudentIds ? 
+      (Array.isArray(initialData.assignedStudentIds) ? initialData.assignedStudentIds : []) : [],
+    questions: initialData?.questions || []
+  });
+
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [courses, setCourses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [formError, setFormError] = useState('');
+  const [activeTab, setActiveTab] = useState(0);
+  const [showQuestionsPanel, setShowQuestionsPanel] = useState(false);
+
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        ...initialData,
+        dueDate: initialData.dueDate ? new Date(initialData.dueDate) : new Date(),
+        assignedStudentIds: initialData.assignedStudentIds ? 
+          (Array.isArray(initialData.assignedStudentIds) ? initialData.assignedStudentIds : []) : []
+      });
+    }
+    fetchCourses();
+  }, [initialData]);
+
+  useEffect(() => {
+    if (formData.courseId) {
+      fetchStudentsForCourse(formData.courseId);
+    }
+  }, [formData.courseId]);
+
+  const fetchCourses = async () => {
+    try {
+      setLoading(true);
+      const response = await courseAPI.getAllCourses();
+      
+      // Filter courses if the user is a teacher
+      let availableCourses = response.data;
+      if (user && user.role === 'TEACHER') {
+        availableCourses = availableCourses.filter(course => {
+          return course.teacherId === user.id;
+        });
+      }
+      
+      setCourses(availableCourses);
+      
+      // Set default course if none selected yet
+      if (availableCourses.length > 0 && !formData.courseId) {
+        setFormData(prev => ({
+          ...prev,
+          courseId: availableCourses[0].id
+        }));
+        fetchStudentsForCourse(availableCourses[0].id);
+      }
+    } catch (error) {
+      console.error('Error fetching courses:', error);
+      setFormError('Failed to fetch courses. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStudentsForCourse = async (courseId) => {
+    try {
+      setLoading(true);
+      console.log(`Fetching students for course ID: ${courseId}`);
+      
+      // Fetch students enrolled in the course
+      const response = await courseAPI.getEnrolledStudents(courseId);
+      console.log('Enrolled students response:', response);
+      
+      if (response.data && Array.isArray(response.data)) {
+        // Convert student IDs to numbers to ensure consistent comparison
+        const studentData = response.data.map(student => ({
+          ...student,
+          id: typeof student.id === 'string' ? parseInt(student.id, 10) : student.id
+        }));
+        
+        setStudents(studentData);
+        console.log(`Found ${studentData.length} students for course:`, studentData);
+        
+        // If there are students and none are selected yet, select all by default
+        if (studentData.length > 0 && formData.assignedStudentIds.length === 0) {
+          setFormData(prev => ({
+            ...prev,
+            assignedStudentIds: studentData.map(s => s.id)
+          }));
+        }
+      } else {
+        console.warn('No students found or invalid response format:', response.data);
+        setStudents([]);
+      }
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      setFormError('Failed to fetch students. Please try again.');
+      setStudents([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddTestStudents = async () => {
+    if (!formData.courseId) {
+      setFormError('Please select a course first');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      console.log(`Adding test students to course ID: ${formData.courseId}`);
+      
+      const response = await courseAPI.addTestStudents(formData.courseId);
+      console.log('Add test students response:', response);
+      
+      if (response.status === 200 || response.status === 201) {
+        // Refetch students after adding test students
+        await fetchStudentsForCourse(formData.courseId);
+        console.log('Successfully added test students and refreshed student list');
+      } else {
+        setFormError('Failed to add test students. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error adding test students:', error);
+      setFormError('Failed to add test students. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    let newValue = type === 'checkbox' ? checked : value;
+    
+    if (type === 'number' && value !== '') {
+      newValue = parseFloat(value);
+    }
+    
+    setFormData({ ...formData, [name]: newValue });
+    
+    // Clear the error for this field if it exists
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: null });
+    }
+  };
+  
+  const handleDateChange = (newDate) => {
+    setFormData({ ...formData, dueDate: newDate });
+    
+    // Clear the due date error if it exists
+    if (errors.dueDate) {
+      setErrors({ ...errors, dueDate: null });
+    }
+  };
+  
+  const handleStudentSelection = (event) => {
+    const { value } = event.target;
+    setFormData({ ...formData, assignedStudentIds: value });
+    
+    // Clear the assigned students error if it exists
+    if (errors.assignedStudentIds) {
+      setErrors({ ...errors, assignedStudentIds: null });
+    }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.title.trim()) {
+      newErrors.title = 'Title is required';
+    }
+    
+    if (!formData.courseId) {
+      newErrors.courseId = 'Course is required';
+    }
+    
+    if (!formData.dueDate) {
+      newErrors.dueDate = 'Due date is required';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  const handleManageQuestions = () => {
+    setShowQuestionsPanel(true);
+  };
+
+  const handleSaveQuestions = (questions) => {
+    // Ensure questions have IDs (for new questions)
+    const questionsWithIds = questions.map((q, index) => {
+      if (!q.id && q.id !== 0) { // Check if id is undefined or null
+        // For new questions, use a temporary negative ID that will be replaced on the server
+        return { ...q, id: -(index + 1) };
+      }
+      return q;
+    });
+    
+    setFormData({ ...formData, questions: questionsWithIds });
+    setShowQuestionsPanel(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      console.log('Form validation failed');
+      setLoading(false);
+    }
+  
+    try {
+      setLoading(true);
+      setFormError('');
+      
+      // Format the data for the API
+      const assignmentData = {
+        ...formData,
+        // Convert date to ISO string for the server
+        dueDate: formData.dueDate.toISOString()
+      };
+      
+      console.log('Submitting assignment data:', assignmentData);
+      
+      // Call the onSubmit callback with the formatted data
+      await onSubmit(assignmentData);
+      
+      // Form was submitted successfully - no need to handle further as the parent component will navigate
+    } catch (error) {
+      console.error('Error submitting form:', error);
+      setFormError('Failed to save assignment. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  if (loading && !courses.length) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Paper sx={{ p: 3, mb: 4 }}>
+      <Typography variant="h5" component="h2" gutterBottom>
+        {initialData ? 'Edit Assignment' : 'Create Assignment'}
+      </Typography>
+      
+      {formError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {formError}
+        </Alert>
+      )}
+      
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        <TextField
+          margin="normal"
+          required
+          fullWidth
+          id="title"
+          label="Title"
+          name="title"
+          value={formData.title}
+          onChange={handleChange}
+          error={!!errors.title}
+          helperText={errors.title}
+        />
+        
+        <TextField
+          margin="normal"
+          fullWidth
+          id="description"
+          label="Description"
+          name="description"
+          multiline
+          rows={4}
+          value={formData.description || ''}
+          onChange={handleChange}
+        />
+        
+        <FormControl 
+          fullWidth 
+          margin="normal" 
+          required
+          error={!!errors.courseId}
+        >
+          <InputLabel id="course-label">Course</InputLabel>
+          <Select
+            labelId="course-label"
+            id="courseId"
+            name="courseId"
+            value={formData.courseId}
+            onChange={handleChange}
+          >
+            {courses.map((course) => (
+              <MenuItem key={course.id} value={course.id}>
+                {course.title}
+              </MenuItem>
+            ))}
+          </Select>
+          {errors.courseId && <FormHelperText>{errors.courseId}</FormHelperText>}
+        </FormControl>
+        
+        <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <DateTimePicker
+            label="Due Date"
+            value={formData.dueDate}
+            onChange={handleDateChange}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                margin="normal"
+                required
+                fullWidth
+                error={!!errors.dueDate}
+                helperText={errors.dueDate}
+              />
+            )}
+          />
+        </LocalizationProvider>
+        
+        {/* Assignment type and maximum score fields removed as we no longer do grading */}
+        
+        <FormControl 
+          fullWidth 
+          margin="normal"
+        >
+          <InputLabel id="assigned-students-label">Assigned Students</InputLabel>
+          <Select
+            labelId="assigned-students-label"
+            id="assignedStudentIds"
+            multiple
+            value={formData.assignedStudentIds}
+            onChange={handleStudentSelection}
+            input={<OutlinedInput label="Assigned Students" />}
+            renderValue={(selected) => (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {selected.map((studentId) => {
+                  const studentName = students.find(s => s.id === studentId)?.name || 
+                                      `Student ID: ${studentId}`;
+                  return <Chip key={studentId} label={studentName} />;
+                })}
+              </Box>
+            )}
+          >
+            {students.map((student) => (
+              <MenuItem key={student.id} value={student.id}>
+                <Checkbox checked={formData.assignedStudentIds.indexOf(student.id) > -1} />
+                <ListItemText primary={student.name || `${student.firstName} ${student.lastName}`} />
+              </MenuItem>
+            ))}
+          </Select>
+          <FormHelperText>
+            Students who will be assigned this assignment
+            {students.length === 0 && 
+              ". No students are currently enrolled in this course."}
+          </FormHelperText>
+        </FormControl>
+        
+        {students.length === 0 && (
+          <Button 
+            variant="outlined" 
+            color="primary" 
+            onClick={handleAddTestStudents}
+            sx={{ mt: 2 }}
+          >
+            Add Test Students
+          </Button>
+        )}
+        
+        <Divider sx={{ my: 3 }} />
+        
+        {!showQuestionsPanel ? (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">
+                Questions ({formData.questions.length})
+              </Typography>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={handleManageQuestions}
+              >
+                Manage Questions
+              </Button>
+            </Box>
+            
+            {formData.questions.length > 0 ? (
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                {formData.questions.map((q, index) => (
+                  <Box key={index} sx={{ mb: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                      {index + 1}. {q.text}
+                    </Typography>
+                    {/* For Multiple Choice, show options */}
+                    {q.questionType === 'MULTIPLE_CHOICE' && q.options && (
+                      <Box sx={{ pl: 3 }}>
+                        {q.options.map((option, optIndex) => (
+                          <Typography key={optIndex} variant="body2" sx={{ 
+                            color: option.isCorrect ? 'success.main' : 'text.primary',
+                            fontWeight: option.isCorrect ? 'bold' : 'normal'
+                          }}>
+                            • {option.text} {option.isCorrect && '(Correct)'}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
+                      Correct Answer: {q.correctAnswer || 'Not specified'}
+                    </Typography>
+                  </Box>
+                ))}
+              </Paper>
+            ) : (
+              <Alert severity="info">
+                No questions yet. Click "Manage Questions" to add questions.
+              </Alert>
+            )}
+          </Box>
+        ) : (
+          <MultipleQuestionForm 
+            initialQuestions={formData.questions}
+            onSave={handleSaveQuestions}
+            onCancel={() => setShowQuestionsPanel(false)}
+          />
+        )}
+        
+        <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+          <Button 
+            variant="outlined"
+            onClick={onCancel}
+            disabled={loading}
+          >
+            Cancel
+          </Button>
+          <Button 
+            type="submit"
+            variant="contained"
+            color="primary"
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <CircularProgress size={24} sx={{ mr: 1 }} />
+                Saving...
+              </>
+            ) : initialData ? 'Update Assignment' : 'Create Assignment'}
+          </Button>
+        </Box>
+      </Box>
+    </Paper>
+  );
+};
+
+export default AssignmentForm;

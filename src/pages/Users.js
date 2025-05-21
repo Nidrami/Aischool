@@ -27,16 +27,20 @@ import {
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
-import { userAPI } from '../services/api';
+import { useNavigate } from 'react-router-dom';
+import userService from '../services/userService';
 
 const Users = () => {
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     role: 'STUDENT',
     password: ''
@@ -53,8 +57,8 @@ const Users = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await userAPI.getAllUsers();
-      setUsers(response.data);
+      const data = await userService.getAllUsers();
+      setUsers(data);
     } catch (error) {
       showSnackbar('Failed to fetch users', 'error');
     }
@@ -63,7 +67,8 @@ const Users = () => {
   const handleOpenDialog = (user = null) => {
     if (user) {
       setFormData({
-        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         email: user.email,
         role: user.role,
         password: '' // Don't show existing password
@@ -71,7 +76,8 @@ const Users = () => {
       setSelectedUser(user);
     } else {
       setFormData({
-        name: '',
+        firstName: '',
+        lastName: '',
         email: '',
         role: 'STUDENT',
         password: ''
@@ -85,7 +91,8 @@ const Users = () => {
     setOpenDialog(false);
     setSelectedUser(null);
     setFormData({
-      name: '',
+      firstName: '',
+      lastName: '',
       email: '',
       role: 'STUDENT',
       password: ''
@@ -112,10 +119,10 @@ const Users = () => {
     e.preventDefault();
     try {
       if (selectedUser) {
-        await userAPI.updateUser(selectedUser.id, formData);
+        await userService.updateUser(selectedUser.id, formData);
         showSnackbar('User updated successfully');
       } else {
-        await userAPI.createUser(formData);
+        await userService.createUser(formData);
         showSnackbar('User created successfully');
       }
       handleCloseDialog();
@@ -128,7 +135,7 @@ const Users = () => {
   const handleDeleteUser = async (userId) => {
     if (window.confirm('Are you sure you want to delete this user?')) {
       try {
-        await userAPI.deleteUser(userId);
+        await userService.deleteUser(userId);
         showSnackbar('User deleted successfully');
         fetchUsers();
       } catch (error) {
@@ -157,7 +164,8 @@ const Users = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Name</TableCell>
+              <TableCell>First Name</TableCell>
+              <TableCell>Last Name</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Role</TableCell>
               <TableCell align="right">Actions</TableCell>
@@ -166,19 +174,22 @@ const Users = () => {
           <TableBody>
             {users.map((user) => (
               <TableRow key={user.id}>
-                <TableCell>{user.name}</TableCell>
+                <TableCell>{user.firstName}</TableCell>
+                <TableCell>{user.lastName}</TableCell>
                 <TableCell>{user.email}</TableCell>
                 <TableCell>{user.role}</TableCell>
                 <TableCell align="right">
                   <IconButton
                     color="primary"
                     onClick={() => handleOpenDialog(user)}
+                    title="Edit User"
                   >
                     <EditIcon />
                   </IconButton>
                   <IconButton
                     color="error"
                     onClick={() => handleDeleteUser(user.id)}
+                    title="Delete User"
                   >
                     <DeleteIcon />
                   </IconButton>
@@ -197,9 +208,18 @@ const Users = () => {
           <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
             <TextField
               fullWidth
-              label="Name"
-              name="name"
-              value={formData.name}
+              label="First Name"
+              name="firstName"
+              value={formData.firstName}
+              onChange={handleInputChange}
+              required
+              margin="normal"
+            />
+            <TextField
+              fullWidth
+              label="Last Name"
+              name="lastName"
+              value={formData.lastName}
               onChange={handleInputChange}
               required
               margin="normal"
